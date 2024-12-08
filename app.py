@@ -22,7 +22,7 @@ embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 # Set up Streamlit
 st.title("Conversational RAG with PDF Upload and Chat History")
 st.write("Upload PDF and chat with its content")
-
+st.secret["HF_API_KEY"]
 # Input the API key
 api_key = st.text_input("Enter the API key:", type="password")
 
