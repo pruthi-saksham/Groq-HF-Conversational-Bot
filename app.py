@@ -1,4 +1,3 @@
-
 import streamlit as st
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
@@ -12,32 +11,44 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.runnables.history import RunnableWithMessageHistory
 import os
+import logging
 
+# Load environment variables
 from dotenv import load_dotenv
 load_dotenv()
 
-os.environ["HF_API_KEY"] = os.getenv("HF_API_KEY")
-embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+# Logging setup
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Set up Streamlit
 st.title("Conversational RAG with PDF Upload and Chat History")
 st.write("Upload PDF and chat with its content")
-st.secret["HF_API_KEY"]
+st.secrets["HF_API_KEY"]
+
 # Input the API key
-api_key = st.text_input("Enter the API key:", type="password")
+api_key = st.text_input("Enter the Groq API key:", type="password")
+
+# Ensure HuggingFace API key is loaded correctly
+os.environ["HF_API_KEY"] = os.getenv("HF_API_KEY")
+if not os.getenv("HF_API_KEY"):
+    st.error("HF_API_KEY is missing. Check your .env file.")
+embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
 # Check if API key is provided
 if api_key:
+    os.environ["GROQ_API_KEY"] = api_key  # Set the Groq API key dynamically
     llm = ChatGroq(groq_api_key=api_key, model_name="Gemma2-9b-It")
 
     # Chat interface
-    session_id = st.text_input("Session ID", value="default session")
+    session_id = st.text_input("Session ID", value="default_session")
 
     # Statefully manage chat history
     if "store" not in st.session_state:
         st.session_state.store = {}
 
     uploaded_files = st.file_uploader("Choose a PDF file", type="pdf", accept_multiple_files=True)
+    
     # Process uploaded files
     if uploaded_files:
         documents = []
@@ -45,18 +56,25 @@ if api_key:
             temppdf = "./temp.pdf"
             with open(temppdf, "wb") as file:
                 file.write(uploaded_file.getvalue())
-                file_name=uploaded_file.name
             
             loader = PyPDFLoader(temppdf)
             docs = loader.load()
             documents.extend(docs)
-
+        
         # Split and create embeddings for the documents
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=5000, chunk_overlap=200)
         splits = text_splitter.split_documents(documents)
-        vectorstore = Chroma.from_documents(documents, embeddings)
+        
+        # Use persistent storage for Chroma
+        vectorstore = Chroma.from_documents(
+            documents=splits, 
+            embedding=embeddings, 
+            persist_directory="./chroma_db"
+        )
+        
         retriever = vectorstore.as_retriever()
 
+        # Contextualize the question
         contextualize_q_system_prompt = (
             '''
             Given a chat history and the latest user question,
@@ -108,6 +126,7 @@ if api_key:
             output_messages_key="answer"
         )
 
+        # User interaction
         user_input = st.text_input("Your question:")
         if user_input:
             session_history = get_session_history(session_id)
@@ -116,20 +135,10 @@ if api_key:
                 config={"configurable": {"session_id": session_id}}
             )
 
-            st.write(st.session_state.store)
-            st.success("assistant:", response["answer"])
+            # Display response and history
+            st.success("Assistant: " + response["answer"])
             st.write("Chat history:", session_history.messages)
+            logger.info(f"Response: {response['answer']}")
 
 else:
     st.warning("Enter a valid API key")
-
-
-
-
-
-
-
-
-
-
-
